@@ -15,35 +15,7 @@
 const Redis = require('ioredis'),
 	redis = new Redis({ db: 3 });
 
-let namespace;
-
-function get_key() {
-	let args = Array.from(arguments).flat(),
-		arr = [namespace].concat(args);
-	return arr.join(':');
-}
-
-function arrify(value) {
-	if (value === null || value === undefined) {
-		return [];
-	}
-
-	if (Array.isArray(value)) {
-		return value;
-	}
-
-	if (typeof value === 'string') {
-		return [value];
-	}
-
-	if (typeof value[Symbol.iterator] === 'function') {
-		return [...value];
-	}
-
-	return [value];
-}
-
-function getJSON(key) {
+function get(key) {
 	return redis
 		.get(key)
 		.then((resp) => {
@@ -58,15 +30,21 @@ function getJSON(key) {
 		.catch(console.error);
 }
 
-function setJSON(key, data) {
-	return redis.set(key, JSON.stringify(data, 0, 4));
+function set(key, data, ttl) {
+	return redis
+		.set(key, JSON.stringify(data, 0, 4))
+		.then((resp) => {
+			// set expiry
+			return redis.expire(key, ttl);
+		})
+		.catch(console.error);
 }
 
-redis.get_key = get_key;
-redis.getJSON = getJSON;
-redis.setJSON = setJSON;
 
-module.exports = (ns = 'usesso') => {
-	namespace = ns;
-	return redis;
+
+module.exports = {
+	get,
+	set,
+	del: (key) => redis.del(key),
+	keys: (key) => redis.keys(key),
 };

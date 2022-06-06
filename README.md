@@ -14,6 +14,8 @@ const routeCache = require('redis-express-cache').config({
 	cacheKey: function (req) {
 		return req.originalUrl;
 	},
+	// Optionally pass a cache client
+	// cacheClient : redisClient
 });
 
 // This is the middleware function
@@ -27,6 +29,10 @@ router.get('your/route', cache, async (req, res, next) => {
 
     // req.cacheKey returns the key used to cache this route
     tempCacheKey = req.cacheKey;
+
+	// set Cache-Control headers
+	req.cacheControl = true;
+	
 	res.send('Cached for 1 hour');
 });
 
@@ -52,5 +58,5 @@ router.post('/new/data/submitted', async (req, res, next) => {
 });
 ```
 
-
-TODO: Better documentation...
+# Read The Docs
+For advanced usage, [read the docs](/doc/main.md).

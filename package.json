@@ -1,6 +1,6 @@
 {
   "name": "redis-express-cache",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "description": "Effective Route Cache for Express; Powered by redis.",
   "main": "index.js",
   "scripts": {

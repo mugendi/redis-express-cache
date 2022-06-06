@@ -1,22 +1,20 @@
 'use strict';
 
-const crypto = require('crypto');
+const crypto = require('crypto'),
+	os = require('os');
 
-let options, redis;
+// console.log(os.hostname());
+
+let options, cache, appName;
 const namespace = 'RExC';
 
+// md5 hash
 function md5(str) {
 	return crypto.createHash('md5').update(str).digest('hex');
 }
 
-module.exports = {
-	config,
-	middleware,
-	clear,
-};
-
+// config
 function config(opts = {}) {
-
 	options = Object.assign(
 		{
 			methods: ['get'],
@@ -26,31 +24,33 @@ function config(opts = {}) {
 		opts
 	);
 
-	redis = options.redisClient || require('./redis')();
+	cache = options.cacheClient || require('./redis');
 
 	return module.exports;
 }
 
+// clear data namespace
 async function clear_by_namespace(key) {
 	key = `${key}:*`;
-	// console.log({ key });
-	redis
+
+	cache
 		.keys(key)
 		.then((resp) => {
-			// console.log(1,resp);
-			if (resp.length) return redis.del(...resp);
+			// console.log(1, resp);
+			if (resp.length) return cache.del(...resp);
 		})
 		.catch(console.error);
 }
 
+// clear
 async function clear(key = null) {
 	// console.log({ key });
 	if (key) {
-		return redis
+		return cache
 			.del(key)
 			.then((resp) => {
 				if (resp == 0) {
-					key = redis.get_key(namespace, key);
+					key = get_key(appName, namespace, key);
 					// no such key, delete by namespace
 					return clear_by_namespace(key);
 				}
@@ -58,11 +58,18 @@ async function clear(key = null) {
 			.catch(console.error);
 	} else {
 		// delete all keys
-		let key = redis.get_key(namespace);
+		let key = get_key(appName, namespace);
 		return clear_by_namespace(key);
 	}
 }
 
+// get key
+function get_key() {
+	let args = Array.from(arguments).flat();
+	return args.join(':');
+}
+
+// middleware
 async function middleware(req, res, next) {
 	// ensure options
 	if (!options) config();
@@ -74,14 +81,16 @@ async function middleware(req, res, next) {
 		return next();
 	}
 
-	// get redis key
-	let key = redis.get_key([namespace, options.cacheKey(req)]);
-	req.cacheKey = key;
+	// get app based on values set with app.set(), environmental value or fallback to hostname
+	appName = req.app.settings.name || process.env.APP_NAME || os.hostname();
 
-	// console.log({options,key})
+	// get redis key
+	let key = get_key(appName, namespace, options.cacheKey(req));
+	// set ttl
+	let ttl = parseInt(options.ttl) || 3600;
+
 	// get value
-	let value = await redis.getJSON(key);
-	let ttl = options.ttl || 3600;
+	let value = await cache.get(key);
 
 	if (value) {
 		// returns the value immediately
@@ -111,6 +120,9 @@ async function middleware(req, res, next) {
 		rawSend(data, true);
 	};
 
+	// save cacheKey
+	req.cacheKey = key;
+
 	// modify TTL
 	req.cacheTTL = (TTL) => {
 		ttl = TTL;
@@ -138,24 +150,26 @@ async function middleware(req, res, next) {
 
 		if (res.statusCode < 400) {
 			// save
-			redis
-				.setJSON(key, { body, isJson })
-				.then((resp) => {
-					// set ttl/expire
-					return redis.expire(key, ttl);
-				})
-				.catch(console.error);
+			cache.set(key, { body, isJson }, ttl).catch(console.error);
 
 			// console.log({ method });
 
-            // TODO: Do we set Cache Control Headers?
+			// TODO: Do we set Cache Control Headers?
 			//set cache control header
-			// if (method == 'get' && process.env.NODE_ENV !== 'development') {
-			// 	res.set('Cache-control', `public, max-age=${ttl}`);
-			// } else {
-			// 	// for the other requests set strict no caching parameters
-			// 	res.set('Cache-control', `no-store`);
-			// }
+			if (
+				//dont cache on development mode
+				process.env.NODE_ENV !== 'development' &&
+				// only add CacheControl if 'true' is passed via route
+				req.cacheControl
+			) {
+				// we should clear browser cache after we have cleared server cache
+				// that way we are sure to fetch new data
+				let maxAge = parseInt(Math.ceil(ttl * 1.05));
+				res.set('Cache-control', `public, max-age=${maxAge}`);
+			} else {
+				// for the other requests set strict no caching parameters
+				res.set('Cache-control', `no-store`);
+			}
 		}
 
 		// cacheStore.set(key, { body: body, isJson: isJson }, ttl);
@@ -168,3 +182,10 @@ async function middleware(req, res, next) {
 		}
 	}
 }
+
+// Exports...
+module.exports = {
+	config,
+	middleware,
+	clear,
+};
